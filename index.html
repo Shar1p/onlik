@@ -172,7 +172,18 @@ select.status-sel option { background:#1e2026; color:var(--text); }
 .btn-add-row svg { width:13px; height:13px; flex-shrink:0; }
 .ch-id-tag { font-size:10px; color:var(--muted); display:block; margin-top:1px; max-width:140px; overflow:hidden; text-overflow:ellipsis; }
 
-/* readonly mode */
+/* drag & drop */
+.drag-handle {
+  width:20px; height:26px; display:inline-flex; align-items:center; justify-content:center;
+  color:var(--muted); cursor:grab; border-radius:4px; transition:color 0.15s;
+  vertical-align:middle;
+}
+.drag-handle:hover { color:var(--text); }
+.drag-handle:active { cursor:grabbing; }
+.drag-handle svg { width:14px; height:14px; pointer-events:none; }
+tr.dragging { opacity:0.4; }
+tr.drag-over td { background:rgba(200,255,0,0.06) !important; border-top:2px solid var(--accent) !important; }
+td.act { display:flex; align-items:center; gap:2px; }
 body.readonly .btn-del { display:none; }
 body.readonly .btn-add-row { display:none; }
 body.readonly input.ci { pointer-events:none; }
@@ -281,6 +292,7 @@ const STATUS_LIST = [
 
 let rows = [];
 let isAdmin = false;
+let dragSrc = null;
 
 // ── AUTH ──
 async function sha256(str) {
@@ -348,8 +360,8 @@ async function sbFetch(path, options = {}) {
 }
 
 async function loadFromSupabase() {
-  const data = await sbFetch('accounts?order=updated_at.asc&select=*');
-  return (data || []).map(r => ({
+  const data = await sbFetch('accounts?order=sort_order.asc&select=*');
+  return (data || []).map((r, i) => ({
     id: r.id,
     email: r.email || '',
     shop: r.shop || '',
@@ -360,6 +372,7 @@ async function loadFromSupabase() {
     channelId: r.channel_id || '',
     deleted: r.deleted || '',
     note: r.note || '',
+    sortOrder: r.sort_order ?? i,
     _stats: r.stats || null
   }));
 }
@@ -379,10 +392,26 @@ async function upsertRow(row) {
       channel_id: row.channelId,
       deleted: row.deleted,
       note: row.note || '',
+      sort_order: row.sortOrder ?? 0,
       stats: row._stats || null,
       updated_at: new Date().toISOString()
     })
   });
+}
+
+async function saveOrder() {
+  // update sort_order for all rows
+  try {
+    for (let i = 0; i < rows.length; i++) {
+      rows[i].sortOrder = i;
+      await sbFetch('accounts', {
+        method: 'POST',
+        headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify({ id: rows[i].id, sort_order: i, updated_at: new Date().toISOString() })
+      });
+    }
+    indicateSaved();
+  } catch(e) { indicateErr(); }
 }
 
 async function deleteRow(id) {
@@ -554,17 +583,23 @@ function restoreStats(row,tr) {
 function statusCls(t){return(STATUS_LIST.find(s=>s.text===t)||STATUS_LIST[0]).cls;}
 function esc(v){return(v||'').toString().replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');}
 function uid(){return Math.random().toString(36).slice(2,10);}
-function newRow(email){return{id:uid(),email:email||'',shop:'',price:'',status:'—',warmupDay:'',link:'',channelId:'',deleted:'',note:'',_stats:null};}
+function newRow(email){return{id:uid(),email:email||'',shop:'',price:'',status:'—',warmupDay:'',link:'',channelId:'',deleted:'',note:'',sortOrder:rows.length,_stats:null};}
 
 function makeRow(row) {
   const tr=document.createElement('tr');
   tr.dataset.id=row.id;
+  tr.draggable = isAdmin;
   const statusOpts=STATUS_LIST.map(s=>`<option value="${esc(s.text)}" ${row.status===s.text?'selected':''}>${s.text}</option>`).join('');
   const isWarmup=row.status==='Прогрев';
   tr.innerHTML=`
-    <td class="act"><button class="btn-del" title="Удалить">
-      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path stroke-linecap="round" d="M5 5l10 10M15 5L5 15"/></svg>
-    </button></td>
+    <td class="act">
+      ${isAdmin ? `<div class="drag-handle" title="Перетащить">
+        <svg viewBox="0 0 20 20" fill="currentColor"><circle cx="7" cy="5" r="1.5"/><circle cx="13" cy="5" r="1.5"/><circle cx="7" cy="10" r="1.5"/><circle cx="13" cy="10" r="1.5"/><circle cx="7" cy="15" r="1.5"/><circle cx="13" cy="15" r="1.5"/></svg>
+      </div>` : ''}
+      <button class="btn-del" title="Удалить">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path stroke-linecap="round" d="M5 5l10 10M15 5L5 15"/></svg>
+      </button>
+    </td>
     <td><input class="ci ei" type="text" placeholder="email@gmail.com" data-field="email" value="${esc(row.email)}"></td>
     <td><input class="ci si" type="text" list="shopSuggestions" placeholder="Магазин..." data-field="shop" value="${esc(row.shop)}"></td>
     <td><input class="ci ni" type="number" placeholder="—" data-field="price" value="${esc(row.price)}"></td>
@@ -617,6 +652,46 @@ function makeRow(row) {
       try { await upsertRow(row); indicateSaved(); } catch(e) { indicateErr(); }
     });
   });
+
+  // drag & drop
+  if (isAdmin) {
+    tr.addEventListener('dragstart', e => {
+      dragSrc = tr;
+      tr.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    tr.addEventListener('dragend', () => {
+      tr.classList.remove('dragging');
+      document.querySelectorAll('tr.drag-over').forEach(r => r.classList.remove('drag-over'));
+    });
+    tr.addEventListener('dragover', e => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      if (dragSrc && dragSrc !== tr && !tr.classList.contains('add-row')) {
+        document.querySelectorAll('tr.drag-over').forEach(r => r.classList.remove('drag-over'));
+        tr.classList.add('drag-over');
+      }
+    });
+    tr.addEventListener('drop', async e => {
+      e.preventDefault();
+      if (!dragSrc || dragSrc === tr || tr.classList.contains('add-row')) return;
+      tr.classList.remove('drag-over');
+      const tbody = document.getElementById('tbody');
+      const addTr = document.getElementById('addRowTr');
+      const allTrs = [...tbody.querySelectorAll('tr:not(#addRowTr)')];
+      const srcIdx = allTrs.indexOf(dragSrc);
+      const tgtIdx = allTrs.indexOf(tr);
+      if (srcIdx < 0 || tgtIdx < 0) return;
+      // reorder DOM
+      if (srcIdx < tgtIdx) tbody.insertBefore(dragSrc, tr.nextSibling);
+      else tbody.insertBefore(dragSrc, tr);
+      // reorder rows array
+      const [moved] = rows.splice(srcIdx, 1);
+      rows.splice(tgtIdx, 0, moved);
+      // save new order
+      await saveOrder();
+    });
+  }
 
   return tr;
 }
