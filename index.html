@@ -130,6 +130,18 @@ input.wi { width:58px; text-align:center; }
 input.ei { width:200px; }
 input.si { width:140px; }
 input.si::-webkit-calendar-picker-indicator { display:none !important; }
+.link-wrap { display:flex; align-items:center; gap:4px; }
+.link-text {
+  display:none; max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  color:var(--text); text-decoration:none; font-size:12px; padding:5px 8px; border-radius:6px;
+}
+.link-text:hover { color:var(--accent); background:rgba(200,255,0,0.04); }
+.link-btn {
+  width:26px; height:26px; border-radius:6px; border:1px solid transparent;
+  color:var(--muted); display:inline-flex; align-items:center; justify-content:center; flex-shrink:0;
+}
+.link-btn:hover { color:var(--accent); border-color:rgba(200,255,0,0.25); background:rgba(200,255,0,0.05); }
+.link-btn svg { width:14px; height:14px; pointer-events:none; }
 
 .sv { display:block; text-align:right; font-size:12.5px; color:var(--text); }
 .sv.empty { color:var(--muted); }
@@ -187,6 +199,8 @@ td.act { display:flex; align-items:center; gap:2px; }
 body.readonly .btn-del { display:none; }
 body.readonly .btn-add-row { display:none; }
 body.readonly input.ci { pointer-events:none; }
+body.readonly .link-edit { display:none !important; }
+body.readonly .link-text.has-link { display:block; pointer-events:auto; }
 body.readonly select.status-sel { pointer-events:none; }
 body.readonly .btn-refresh { display:none; }
 body.readonly .btn-icon { display:none; }
@@ -618,9 +632,10 @@ function makeRow(row) {
       <span class="wd-dash" style="color:var(--muted);font-size:11px;display:${isWarmup?'none':'inline'}">—</span>
     </td>
     <td>
-      <div style="display:flex;align-items:center;gap:4px">
-        <input class="ci li" type="text" placeholder="https://youtube.com/..." data-field="link" value="${esc(row.link)}">
-        <a class="link-btn" href="${esc(href)}" target="_blank" rel="noopener noreferrer" title="Открыть канал" style="display:${href?'flex':'none'}">
+      <div class="link-wrap">
+        <a class="link-text ${href?'has-link':''}" href="${esc(href)}" target="_blank" rel="noopener noreferrer" title="Открыть канал">${esc(row.link)}</a>
+        <input class="ci li link-edit" type="text" placeholder="https://youtube.com/..." data-field="link" value="${esc(row.link)}">
+        <a class="link-btn link-edit" href="${esc(href)}" target="_blank" rel="noopener noreferrer" title="Открыть канал" style="display:${href?'inline-flex':'none'}">
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path stroke-linecap="round" stroke-linejoin="round" d="M11 3h6v6M17 3l-8 8M8 5H4a1 1 0 00-1 1v10a1 1 0 001 1h10a1 1 0 001-1v-4"/></svg>
         </a>
       </div>
@@ -653,11 +668,19 @@ function makeRow(row) {
 
   const linkInp=tr.querySelector('[data-field=link]');
   const linkBtn=tr.querySelector('.link-btn');
+  const linkText=tr.querySelector('.link-text');
   const syncLinkBtn=() => {
     const href=linkHref(linkInp.value);
     linkBtn.href=href || '#';
-    linkBtn.style.display=href?'flex':'none';
+    linkBtn.style.display=href?'inline-flex':'none';
+    linkText.href=href || '#';
+    linkText.textContent=linkInp.value.trim();
+    linkText.classList.toggle('has-link', !!href);
   };
+  linkText.addEventListener('click', e => {
+    syncLinkBtn();
+    if(!linkHref(linkInp.value)) e.preventDefault();
+  });
   linkInp.addEventListener('input', syncLinkBtn);
   linkBtn.addEventListener('click', e => {
     syncLinkBtn();
