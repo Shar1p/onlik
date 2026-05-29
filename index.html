@@ -582,6 +582,14 @@ function restoreStats(row,tr) {
 // ── RENDER ──
 function statusCls(t){return(STATUS_LIST.find(s=>s.text===t)||STATUS_LIST[0]).cls;}
 function esc(v){return(v||'').toString().replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');}
+function linkHref(v){
+  const s=(v||'').trim();
+  if(!s) return '';
+  if(/^https?:\/\//i.test(s) || /^(mailto|tel):/i.test(s)) return s;
+  if(/^@[\w.-]+$/.test(s)) return `https://www.youtube.com/${s}`;
+  if(/^UC[\w-]{22}$/.test(s)) return `https://www.youtube.com/channel/${s}`;
+  return `https://${s}`;
+}
 function uid(){return Math.random().toString(36).slice(2,10);}
 function newRow(email){return{id:uid(),email:email||'',shop:'',price:'',status:'—',warmupDay:'',link:'',channelId:'',deleted:'',note:'',sortOrder:rows.length,_stats:null};}
 
@@ -591,6 +599,7 @@ function makeRow(row) {
   tr.draggable = isAdmin;
   const statusOpts=STATUS_LIST.map(s=>`<option value="${esc(s.text)}" ${row.status===s.text?'selected':''}>${s.text}</option>`).join('');
   const isWarmup=row.status==='Прогрев';
+  const href=linkHref(row.link);
   tr.innerHTML=`
     <td class="act">
       ${isAdmin ? `<div class="drag-handle" title="Перетащить">
@@ -609,7 +618,12 @@ function makeRow(row) {
       <span class="wd-dash" style="color:var(--muted);font-size:11px;display:${isWarmup?'none':'inline'}">—</span>
     </td>
     <td>
-      <input class="ci li" type="text" placeholder="https://youtube.com/..." data-field="link" value="${esc(row.link)}">
+      <div style="display:flex;align-items:center;gap:4px">
+        <input class="ci li" type="text" placeholder="https://youtube.com/..." data-field="link" value="${esc(row.link)}">
+        <a class="link-btn" href="${esc(href)}" target="_blank" rel="noopener noreferrer" title="Открыть канал" style="display:${href?'flex':'none'}">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path stroke-linecap="round" stroke-linejoin="round" d="M11 3h6v6M17 3l-8 8M8 5H4a1 1 0 00-1 1v10a1 1 0 001 1h10a1 1 0 001-1v-4"/></svg>
+        </a>
+      </div>
       <span class="ch-id-tag">${esc(row.channelId)}</span>
     </td>
     <td class="vg right"><span class="sv empty" data-stat="views">—</span></td>
@@ -638,10 +652,23 @@ function makeRow(row) {
   });
 
   const linkInp=tr.querySelector('[data-field=link]');
+  const linkBtn=tr.querySelector('.link-btn');
+  const syncLinkBtn=() => {
+    const href=linkHref(linkInp.value);
+    linkBtn.href=href || '#';
+    linkBtn.style.display=href?'flex':'none';
+  };
+  linkInp.addEventListener('input', syncLinkBtn);
+  linkBtn.addEventListener('click', e => {
+    syncLinkBtn();
+    if(!linkHref(linkInp.value)) e.preventDefault();
+  });
   linkInp.addEventListener('change', async () => {
     row.channelId=''; row._stats=null;
     const tag=tr.querySelector('.ch-id-tag'); if(tag) tag.textContent='';
-    row.link=linkInp.value;
+    row.link=linkInp.value.trim();
+    linkInp.value=row.link;
+    syncLinkBtn();
     try { await upsertRow(row); indicateSaved(); } catch(e) { indicateErr(); }
   });
 
